@@ -1,40 +1,132 @@
-const TelegramBot = require("node-telegram-bot-api");
-const axios = require("axios");
-const express = require("express");
+// index.js
+const TelegramBot = require('node-telegram-bot-api');
+const axios = require('axios');
 
-// ===== ENV VALIDATION =====
-const REQUIRED_ENV = ["TELEGRAM_TOKEN", "GROQ_API_KEY", "HF_API_KEY"];
-REQUIRED_ENV.forEach((key) => {
-  if (!process.env[key]) {
-    console.error(`Missing required environment variable: ${key}`);
-    process.exit(1);
-  }
-});
+// Load environment variables
+const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
+const GROQ_API_KEY = process.env.GROQ_API_KEY;
+const HF_API_KEY = process.env.HF_API_KEY;
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const TOGETHER_API_KEY = process.env.TOGETHER_API_KEY;
+const SESSION_TIMEOUT = process.env.SESSION_TIMEOUT || 300000; // default 5 mins
 
-// ===== INIT =====
-const bot = new TelegramBot(process.env.TELEGRAM_TOKEN, { polling: true });
-const app = express();
-const PORT = process.env.PORT || 3000;
+const bot = new TelegramBot(TELEGRAM_TOKEN, { polling: true });
 
-const sessions = new Map();
-const SESSION_TIMEOUT = 5 * 60 * 1000;
-const startTime = Date.now();
+// Session tracking
+const sessions = {};
 
-// ===== RENDER HEALTH CHECK =====
-app.get("/", (req, res) => {
-  res.send("StainAI is operational.");
-});
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
-
-// ===== UTILITIES =====
-function formatUptime(ms) {
-  const s = Math.floor((ms / 1000) % 60);
-  const m = Math.floor((ms / (1000 * 60)) % 60);
-  const h = Math.floor((ms / (1000 * 60 * 60)) % 24);
-  return `${h}h ${m}m ${s}s`;
+// Helper: AI fallback sequence
+async function generateAIResponse(prompt) {
+    // Groq Primary
+    try {
+        const groqResp = await axios.post(
+            'https://api.groq.ai/v1/complete',
+            { prompt },
+            { headers: { 'Authorization': `Bearer ${GROQ_API_KEY}` } }
+        );
+        return groqResp.data.response;
+    } catch (err1) {
+        // Hugging Face Backup
+        try {
+            const hfResp = await axios.post(
+                'https://api-inference.huggingface.co/models/mistral-7b',
+                { inputs: prompt },
+                { headers: { 'Authorization': `Bearer ${HF_API_KEY}` } }
+            );
+            return hfResp.data[0].generated_text;
+        } catch (err2) {
+            // Google Gemini
+            try {
+                const gemResp = await axios.post(
+                    'https://api.google.com/gemini/complete', 
+                    { prompt },
+                    { headers: { 'Authorization': `Bearer ${GEMINI_API_KEY}` } }
+                );
+                return gemResp.data.output_text;
+            } catch (err3) {
+                // Together AI
+                try {
+                    const togetherResp = await axios.post(
+                        'https://api.together.xyz/complete',
+                        { prompt },
+                        { headers: { 'Authorization': `Bearer ${TOGETHER_API_KEY}` } }
+                    );
+                    return togetherResp.data.output_text;
+                } catch (err4) {
+                    return "Sorry, all AI services are temporarily unavailable 😔💔";
+                }
+            }
+        }
+    }
 }
+
+// /start command
+bot.onText(/\/start/, (msg) => {
+    const chatId = msg.chat.id;
+    const image = "https://i.ibb.co/cSQVfxp5/d3e716fb89edd137dc750918ccfe22e8.jpg";
+    const text = "🎉 Welcome to **StainAI** 🤖✨\nYour integrated AI assistant is ready! 🚀💡\n\nUse /ai to chat, /ping to test me, /dev for info, /support to contact us 📩";
+    bot.sendPhoto(chatId, image, { caption: text, parse_mode: "Markdown" });
+});
+
+// /ping command
+bot.onText(/\/ping/, (msg) => {
+    const chatId = msg.chat.id;
+    const image = "https://i.postimg.cc/zBSmF57x/81906eeacfe1812228578eaa0689d050.jpg";
+    const text = "⚡ Ping received! 💡\nLatency: blazing fast 🚀\nMemory: fully optimized 🧠\nKeep pushing forward, success is near! 🌟💪";
+    bot.sendPhoto(chatId, image, { caption: text });
+});
+
+// /dev command
+bot.onText(/\/dev/, (msg) => {
+    const chatId = msg.chat.id;
+    const image = "https://i.postimg.cc/VNW476yJ/4d59188bad5eb3f3043447cbb97076c8.jpg";
+    const text = "👨‍💻 Contact the owner and developers of StainAI:\n\nMain Dev: Ken - https://linktr.ee/iamevanss 🔗\nCo-Dev: Ted - https://wa.me/2349033047066 📲";
+    bot.sendPhoto(chatId, image, { caption: text });
+});
+
+// /support command
+bot.onText(/\/support/, (msg) => {
+    const chatId = msg.chat.id;
+    const text = "📩 Need help? Reach out to StainAI directly via Telegram: @heisevanss 💬✨";
+    bot.sendMessage(chatId, text);
+});
+
+// /ai command to start chat session
+bot.onText(/\/ai/, async (msg) => {
+    const chatId = msg.chat.id;
+    if (sessions[chatId]) {
+        bot.sendMessage(chatId, "⚠️ You already have an active AI session. Use /cancelsession to close it first.");
+        return;
+    }
+    bot.sendMessage(chatId, "🤖 AI session started! Send your messages. Session will auto-close after 5 minutes ⏰.");
+    sessions[chatId] = setTimeout(() => {
+        delete sessions[chatId];
+        bot.sendMessage(chatId, "⏳ AI session closed due to inactivity. Use /ai to start a new one.");
+    }, parseInt(SESSION_TIMEOUT));
+
+    bot.on('message', async function aiListener(replyMsg) {
+        if (replyMsg.chat.id !== chatId) return;
+        if (replyMsg.text.startsWith("/")) return; // Ignore commands
+        if (!sessions[chatId]) return;
+
+        const response = await generateAIResponse(replyMsg.text);
+        bot.sendMessage(chatId, `🤖 AI Response: ${response} 🌟`);
+    });
+});
+
+// /cancelsession command
+bot.onText(/\/cancelsession/, (msg) => {
+    const chatId = msg.chat.id;
+    if (!sessions[chatId]) {
+        bot.sendMessage(chatId, "⚠️ No active AI session found.");
+        return;
+    }
+    clearTimeout(sessions[chatId]);
+    delete sessions[chatId];
+    bot.sendMessage(chatId, "❌ AI session has been cancelled successfully.");
+});
+
+console.log("🚀 StainAI Bot is running... All systems go! 🌟");}
 
 // ===== GROQ PRIMARY ENGINE =====
 async function queryGroq(message) {
