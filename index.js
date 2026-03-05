@@ -1,345 +1,230 @@
-// index.js
-const TelegramBot = require('node-telegram-bot-api');
-const axios = require('axios');
+const TelegramBot = require("node-telegram-bot-api")
+const axios = require("axios")
+const express = require("express")
 
-// Load environment variables
-const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
-const GROQ_API_KEY = process.env.GROQ_API_KEY;
-const HF_API_KEY = process.env.HF_API_KEY;
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const TOGETHER_API_KEY = process.env.TOGETHER_API_KEY;
-const SESSION_TIMEOUT = process.env.SESSION_TIMEOUT || 300000; // default 5 mins
+const bot = new TelegramBot(process.env.BOT_TOKEN, { polling: true })
 
-const bot = new TelegramBot(TELEGRAM_TOKEN, { polling: true });
+const app = express()
+app.get("/", (req, res) => res.send("StainAI Running"))
+app.listen(process.env.PORT || 3000)
 
-// Session tracking
-const sessions = {};
+const SESSION_TIMEOUT = Number(process.env.SESSION_TIMEOUT) || 300000
 
-// Helper: AI fallback sequence
-async function generateAIResponse(prompt) {
-    // Groq Primary
-    try {
-        const groqResp = await axios.post(
-            'https://api.groq.ai/v1/complete',
-            { prompt },
-            { headers: { 'Authorization': `Bearer ${GROQ_API_KEY}` } }
-        );
-        return groqResp.data.response;
-    } catch (err1) {
-        // Hugging Face Backup
-        try {
-            const hfResp = await axios.post(
-                'https://api-inference.huggingface.co/models/mistral-7b',
-                { inputs: prompt },
-                { headers: { 'Authorization': `Bearer ${HF_API_KEY}` } }
-            );
-            return hfResp.data[0].generated_text;
-        } catch (err2) {
-            // Google Gemini
-            try {
-                const gemResp = await axios.post(
-                    'https://api.google.com/gemini/complete', 
-                    { prompt },
-                    { headers: { 'Authorization': `Bearer ${GEMINI_API_KEY}` } }
-                );
-                return gemResp.data.output_text;
-            } catch (err3) {
-                // Together AI
-                try {
-                    const togetherResp = await axios.post(
-                        'https://api.together.xyz/complete',
-                        { prompt },
-                        { headers: { 'Authorization': `Bearer ${TOGETHER_API_KEY}` } }
-                    );
-                    return togetherResp.data.output_text;
-                } catch (err4) {
-                    return "Sorry, all AI services are temporarily unavailable 😔💔";
-                }
-            }
-        }
-    }
-}
+let sessions = {}
 
-// /start command
+const startImage = "https://i.ibb.co/cSQVfxp5/d3e716fb89edd137dc750918ccfe22e8.jpg"
+const pingImage = "https://i.postimg.cc/zBSmF57x/81906eeacfe1812228578eaa0689d050.jpg"
+const devImage = "https://i.postimg.cc/VNW476yJ/4d59188bad5eb3f3043447cbb97076c8.jpg"
+
 bot.onText(/\/start/, (msg) => {
-    const chatId = msg.chat.id;
-    const image = "https://i.ibb.co/cSQVfxp5/d3e716fb89edd137dc750918ccfe22e8.jpg";
-    const text = "🎉 Welcome to **StainAI** 🤖✨\nYour integrated AI assistant is ready! 🚀💡\n\nUse /ai to chat, /ping to test me, /dev for info, /support to contact us 📩";
-    bot.sendPhoto(chatId, image, { caption: text, parse_mode: "Markdown" });
-});
 
-// /ping command
-bot.onText(/\/ping/, (msg) => {
-    const chatId = msg.chat.id;
-    const image = "https://i.postimg.cc/zBSmF57x/81906eeacfe1812228578eaa0689d050.jpg";
-    const text = "⚡ Ping received! 💡\nLatency: blazing fast 🚀\nMemory: fully optimized 🧠\nKeep pushing forward, success is near! 🌟💪";
-    bot.sendPhoto(chatId, image, { caption: text });
-});
+const chatId = msg.chat.id
 
-// /dev command
-bot.onText(/\/dev/, (msg) => {
-    const chatId = msg.chat.id;
-    const image = "https://i.postimg.cc/VNW476yJ/4d59188bad5eb3f3043447cbb97076c8.jpg";
-    const text = "👨‍💻 Contact the owner and developers of StainAI:\n\nMain Dev: Ken - https://linktr.ee/iamevanss 🔗\nCo-Dev: Ted - https://wa.me/2349033047066 📲";
-    bot.sendPhoto(chatId, image, { caption: text });
-});
+const caption = `🤖 *Welcome to StainAI.*
 
-// /support command
-bot.onText(/\/support/, (msg) => {
-    const chatId = msg.chat.id;
-    const text = "📩 Need help? Reach out to StainAI directly via Telegram: @heisevanss 💬✨";
-    bot.sendMessage(chatId, text);
-});
+An integrated artificial intelligence assistant designed to help you generate ideas, answer questions, and solve problems efficiently.
 
-// /ai command to start chat session
-bot.onText(/\/ai/, async (msg) => {
-    const chatId = msg.chat.id;
-    if (sessions[chatId]) {
-        bot.sendMessage(chatId, "⚠️ You already have an active AI session. Use /cancelsession to close it first.");
-        return;
-    }
-    bot.sendMessage(chatId, "🤖 AI session started! Send your messages. Session will auto-close after 5 minutes ⏰.");
-    sessions[chatId] = setTimeout(() => {
-        delete sessions[chatId];
-        bot.sendMessage(chatId, "⏳ AI session closed due to inactivity. Use /ai to start a new one.");
-    }, parseInt(SESSION_TIMEOUT));
+Use the buttons below to navigate through available commands.
 
-    bot.on('message', async function aiListener(replyMsg) {
-        if (replyMsg.chat.id !== chatId) return;
-        if (replyMsg.text.startsWith("/")) return; // Ignore commands
-        if (!sessions[chatId]) return;
+⚡ Intelligent assistance at your fingertips.`
 
-        const response = await generateAIResponse(replyMsg.text);
-        bot.sendMessage(chatId, `🤖 AI Response: ${response} 🌟`);
-    });
-});
-
-// /cancelsession command
-bot.onText(/\/cancelsession/, (msg) => {
-    const chatId = msg.chat.id;
-    if (!sessions[chatId]) {
-        bot.sendMessage(chatId, "⚠️ No active AI session found.");
-        return;
-    }
-    clearTimeout(sessions[chatId]);
-    delete sessions[chatId];
-    bot.sendMessage(chatId, "❌ AI session has been cancelled successfully.");
-});
-
-console.log("🚀 StainAI Bot is running... All systems go! 🌟");}
-
-// ===== GROQ PRIMARY ENGINE =====
-async function queryGroq(message) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 6000);
-
-  try {
-    const response = await axios.post(
-      "https://api.groq.com/openai/v1/chat/completions",
-      {
-        model: "llama3-8b-8192",
-        messages: [{ role: "user", content: message }]
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
-          "Content-Type": "application/json"
-        },
-        signal: controller.signal
-      }
-    );
-
-    clearTimeout(timeout);
-
-    const content = response.data?.choices?.[0]?.message?.content;
-    if (!content) throw new Error("Empty Groq response");
-
-    return content;
-  } catch (err) {
-    clearTimeout(timeout);
-    throw err;
-  }
+bot.sendPhoto(chatId, startImage, {
+caption,
+parse_mode:"Markdown",
+reply_markup:{
+keyboard:[
+["/ai","/ping"],
+["/dev","/support"]
+],
+resize_keyboard:true
 }
+})
 
-// ===== HUGGING FACE BACKUP ENGINE =====
-async function queryHuggingFace(message) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 10000);
+})
 
-  try {
-    const response = await axios.post(
-      "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.2",
-      { inputs: message },
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.HF_API_KEY}`,
-          "Content-Type": "application/json"
-        },
-        signal: controller.signal
-      }
-    );
+bot.onText(/\/ping/, (msg)=>{
 
-    clearTimeout(timeout);
+const chatId = msg.chat.id
 
-    const generated = response.data?.[0]?.generated_text;
-    if (!generated) throw new Error("Empty HF response");
+const caption = `📡 *StainAI System Status*
 
-    return `_Response generated via secondary AI engine._\n\n${generated}`;
-  } catch (err) {
-    clearTimeout(timeout);
-    throw err;
-  }
-}
+✅ Bot Status: Online  
+⚡ Response Time: Fast  
+🧠 AI Systems: Operational  
 
-// ===== FAILOVER CONTROLLER =====
-async function generateAIResponse(message) {
-  try {
-    return await queryGroq(message);
-  } catch (primaryError) {
-    console.error("Groq failed:", primaryError.message);
+"Progress begins with curiosity and discipline."`
 
-    try {
-      return await queryHuggingFace(message);
-    } catch (secondaryError) {
-      console.error("HuggingFace failed:", secondaryError.message);
-      return "AI services are temporarily unavailable. Please try again shortly.";
-    }
-  }
-}
+bot.sendPhoto(chatId,pingImage,{
+caption,
+parse_mode:"Markdown"
+})
 
-// ===== START =====
-bot.onText(/\/start/, async (msg) => {
-  const chatId = msg.chat.id;
+})
 
-  await bot.sendPhoto(
-    chatId,
-    "https://i.ibb.co/cSQVfxp5/d3e716fb89edd137dc750918ccfe22e8.jpg"
-  );
+bot.onText(/\/dev/, (msg)=>{
 
-  const text = `
-*StainAI – Integrated AI System*
+const chatId = msg.chat.id
 
-Welcome to a professionally engineered AI platform.
+const caption = `👨‍💻 *StainAI Development Team*
 
-Available Commands:
-• /ai – Activate AI session
-• /ping – System diagnostics
-• /dev – Development team
-• /support – Direct support
-
-Built for reliability. Designed for intelligence.
-`;
-
-  bot.sendMessage(chatId, text, { parse_mode: "Markdown" });
-});
-
-// ===== AI SESSION START =====
-bot.onText(/\/ai/, (msg) => {
-  sessions.set(msg.from.id, Date.now());
-
-  bot.sendMessage(
-    msg.chat.id,
-    "_AI session activated._\nSession expires after 5 minutes of inactivity.\nUse /cancelsession to close manually.",
-    { parse_mode: "Markdown" }
-  );
-});
-
-// ===== CANCEL SESSION =====
-bot.onText(/\/cancelsession/, (msg) => {
-  if (sessions.has(msg.from.id)) {
-    sessions.delete(msg.from.id);
-    bot.sendMessage(msg.chat.id, "AI session closed successfully.");
-  } else {
-    bot.sendMessage(msg.chat.id, "No active AI session found.");
-  }
-});
-
-// ===== SUPPORT =====
-bot.onText(/\/support/, (msg) => {
-  bot.sendMessage(
-    msg.chat.id,
-    "Reach out to StainAI directly via Telegram: @heisevanss"
-  );
-});
-
-// ===== DEV =====
-bot.onText(/\/dev/, async (msg) => {
-  await bot.sendPhoto(
-    msg.chat.id,
-    "https://i.postimg.cc/VNW476yJ/4d59188bad5eb3f3043447cbb97076c8.jpg"
-  );
-
-  const text = `
-*Contact the Owner & Development Team of StainAI*
-
-🤖 *Main Developer*  
+Main Developer  
 Ken  
 https://linktr.ee/iamevanss  
 
-🧠 *Co-Developer*  
+Co-Developer  
 Ted  
-https://wa.me/2349033047066
-`;
+https://wa.me/2349033047066`
 
-  bot.sendMessage(msg.chat.id, text, { parse_mode: "Markdown" });
-});
+bot.sendPhoto(chatId,devImage,{
+caption,
+parse_mode:"Markdown"
+})
 
-// ===== PING =====
-bot.onText(/\/ping/, async (msg) => {
-  const uptime = formatUptime(Date.now() - startTime);
-  const memory = (process.memoryUsage().heapUsed / 1024 / 1024).toFixed(2);
+})
 
-  const text = `
-*StainAI System Diagnostics*
+bot.onText(/\/support/, (msg)=>{
 
-⚡ Uptime: ${uptime}
-⚡ Memory Usage: ${memory} MB
+const chatId = msg.chat.id
 
-_"Precision. Reliability. Intelligence."_
-_"Systems built with discipline endure."_
-`;
+bot.sendMessage(chatId,
+`🛠 *Support*
 
-  await bot.sendMessage(msg.chat.id, text, { parse_mode: "Markdown" });
+For assistance or inquiries regarding StainAI, please contact:
 
-  await bot.sendPhoto(
-    msg.chat.id,
-    "https://i.postimg.cc/zBSmF57x/81906eeacfe1812228578eaa0689d050.jpg"
-  );
-});
+@heisevanss`,
+{parse_mode:"Markdown"})
 
-// ===== AI MESSAGE HANDLER =====
-bot.on("message", async (msg) => {
-  const userId = msg.from.id;
-  if (!sessions.has(userId)) return;
-  if (!msg.text || msg.text.startsWith("/")) return;
+})
 
-  const lastActive = sessions.get(userId);
+bot.onText(/\/ai/, (msg)=>{
 
-  if (Date.now() - lastActive > SESSION_TIMEOUT) {
-    sessions.delete(userId);
-    bot.sendMessage(
-      msg.chat.id,
-      "Session expired due to inactivity. Please use /ai to start again."
-    );
-    return;
-  }
+const chatId = msg.chat.id
 
-  sessions.set(userId, Date.now());
+sessions[chatId]={
+active:true,
+last:Date.now()
+}
 
-  try {
-    const response = await generateAIResponse(msg.text);
-    bot.sendMessage(msg.chat.id, response, { parse_mode: "Markdown" });
-  } catch (err) {
-    console.error(err.message);
-    bot.sendMessage(msg.chat.id, "AI request failed.");
-  }
-});
+bot.sendMessage(chatId,
+`🧠 *AI Session Activated.*
 
-// ===== GLOBAL ERROR HANDLING =====
-process.on("unhandledRejection", (err) => {
-  console.error("Unhandled Rejection:", err);
-});
+You can now send messages and receive intelligent responses.
 
-process.on("uncaughtException", (err) => {
-  console.error("Uncaught Exception:", err);
-});
+This session will automatically close after 5 minutes of inactivity.
+
+Use /cancelsession to close it manually.`,
+{parse_mode:"Markdown"})
+
+})
+
+bot.onText(/\/cancelsession/, (msg)=>{
+
+const chatId = msg.chat.id
+
+delete sessions[chatId]
+
+bot.sendMessage(chatId,
+`⚠️ *AI Session Closed.*
+
+You may start a new session anytime using /ai`,
+{parse_mode:"Markdown"})
+
+})
+
+bot.on("message", async (msg)=>{
+
+const chatId = msg.chat.id
+const text = msg.text
+
+if(!sessions[chatId]) return
+if(text.startsWith("/")) return
+
+if(Date.now()-sessions[chatId].last > SESSION_TIMEOUT){
+
+delete sessions[chatId]
+
+bot.sendMessage(chatId,"⚠️ Session expired. Start again with /ai")
+return
+}
+
+sessions[chatId].last = Date.now()
+
+let reply = null
+
+try{
+
+const groq = await axios.post(
+"https://api.groq.com/openai/v1/chat/completions",
+{
+model:"llama3-70b-8192",
+messages:[{role:"user",content:text}]
+},
+{
+headers:{
+Authorization:`Bearer ${process.env.GROQ_KEY}`
+}
+})
+
+reply = groq.data.choices[0].message.content
+
+}catch(e){
+
+try{
+
+const gemini = await axios.post(
+`https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${process.env.GEMINI_KEY}`,
+{
+contents:[{parts:[{text:text}]}]
+})
+
+reply = gemini.data.candidates[0].content.parts[0].text
+
+}catch(e){
+
+try{
+
+const together = await axios.post(
+"https://api.together.xyz/v1/completions",
+{
+model:"mistralai/Mistral-7B-Instruct-v0.1",
+prompt:text,
+max_tokens:500
+},
+{
+headers:{
+Authorization:`Bearer ${process.env.TOGETHER_KEY}`
+}
+})
+
+reply = together.data.choices[0].text
+
+}catch(e){
+
+try{
+
+const hf = await axios.post(
+"https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.1",
+{text:text},
+{
+headers:{
+Authorization:`Bearer ${process.env.HF_KEY}`
+}
+})
+
+reply = JSON.stringify(hf.data)
+
+}catch(e){
+
+reply = "AI services are temporarily unavailable. Please try again shortly."
+
+}
+
+}
+
+}
+
+}
+
+bot.sendMessage(chatId,reply)
+
+})
